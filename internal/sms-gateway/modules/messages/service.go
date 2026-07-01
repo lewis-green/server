@@ -81,6 +81,13 @@ func (s *Service) SelectPending(deviceID string, order Order) ([]Message, error)
 	return slices.MapOrError(messages, messageToDomain) //nolint:wrapcheck // already wrapped
 }
 
+// CountPendingByDevice returns the number of pending messages for each of the
+// provided device IDs. Devices with no pending messages are omitted from the
+// returned map. It is intended as a load-lookup for balanced device selection.
+func (s *Service) CountPendingByDevice(deviceIDs []string) (map[string]int, error) {
+	return s.messages.countPendingByDevice(deviceIDs)
+}
+
 func (s *Service) UpdateState(device *models.Device, message MessageStateInput) error {
 	existing, err := s.messages.get(
 		*new(SelectFilter).WithExtID(message.ID).WithDeviceID(device.ID),

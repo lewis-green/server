@@ -114,6 +114,36 @@ func (r *Repository) listPending(deviceID string, order Order) ([]messageModel, 
 	return messages, err
 }
 
+// countPendingByDevice returns the number of pending messages for each of the
+// provided device IDs. Devices with no pending messages are omitted from the
+// result. It relies on the idx_messages_device_state (device_id, state) index.
+func (r *Repository) countPendingByDevice(deviceIDs []string) (map[string]int, error) {
+	if len(deviceIDs) == 0 {
+		return map[string]int{}, nil
+	}
+
+	var rows []struct {
+		DeviceID string
+		Count    int
+	}
+	if err := r.db.
+		Model((*messageModel)(nil)).
+		Select("device_id, COUNT(*) AS count").
+		Where("device_id IN ?", deviceIDs).
+		Where("state = ?", ProcessingStatePending).
+		Group("device_id").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("failed to count pending messages by device: %w", err)
+	}
+
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		counts[row.DeviceID] = row.Count
+	}
+
+	return counts, nil
+}
+
 func (r *Repository) get(filter SelectFilter, options SelectOptions) (messageModel, error) {
 	messages, _, err := r.list(filter, options)
 	if err != nil {

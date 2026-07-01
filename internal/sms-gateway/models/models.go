@@ -25,6 +25,11 @@ type Device struct {
 
 	LastSeen time.Time `gorm:"not null;autocreatetime:false;default:CURRENT_TIMESTAMP(3);index:idx_devices_last_seen"`
 
+	// ServiceDegradedUntil marks the device as skipped for automatic message
+	// selection until this time, set when the device reports a no-service send
+	// failure. NULL means the device has cellular service.
+	ServiceDegradedUntil *time.Time `gorm:"type:datetime(3)"`
+
 	UserID string `gorm:"not null;type:varchar(32)"`
 }
 

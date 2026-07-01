@@ -83,6 +83,34 @@ func (r *Repository) UpdatePushToken(id string, token *string) error {
 	return nil
 }
 
+// SetServiceDegradedUntil puts the device into a service cooldown until the
+// given time, so automatic selection skips it.
+func (r *Repository) SetServiceDegradedUntil(ctx context.Context, id string, until time.Time) error {
+	res := r.db.WithContext(ctx).
+		Model((*models.Device)(nil)).
+		Where("id = ?", id).
+		UpdateColumn("service_degraded_until", until)
+	if res.Error != nil {
+		return fmt.Errorf("failed to set device service state: %w", res.Error)
+	}
+
+	return nil
+}
+
+// ClearServiceDegraded lifts a device's service cooldown. The IS NOT NULL guard
+// makes it a no-op write for the common case where the device isn't degraded.
+func (r *Repository) ClearServiceDegraded(ctx context.Context, id string) error {
+	res := r.db.WithContext(ctx).
+		Model((*models.Device)(nil)).
+		Where("id = ? AND service_degraded_until IS NOT NULL", id).
+		UpdateColumn("service_degraded_until", nil)
+	if res.Error != nil {
+		return fmt.Errorf("failed to clear device service state: %w", res.Error)
+	}
+
+	return nil
+}
+
 func (r *Repository) SetLastSeen(ctx context.Context, id string, lastSeen time.Time) error {
 	if lastSeen.IsZero() {
 		return nil // ignore zero timestamps

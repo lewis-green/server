@@ -116,8 +116,11 @@ func Module() fx.Option {
 				HashingInterval: time.Duration(cfg.Messages.HashingIntervalSeconds) * time.Second,
 			}
 		}),
-		fx.Provide(func(_ Config) devices.Config {
-			return devices.Config{}
+		fx.Provide(func(cfg Config) devices.Config {
+			return devices.Config{
+				SelectionStrategy: devices.SelectionStrategy(cfg.Devices.SelectionStrategy),
+				ServiceCooldown:   time.Duration(cfg.Devices.ServiceCooldownSeconds) * time.Second,
+			}
 		}),
 		fx.Provide(func(cfg Config) sse.Config {
 			return sse.NewConfig(

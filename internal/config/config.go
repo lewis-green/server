@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"time"
+
+	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/devices"
+)
 
 type GatewayMode string
 
@@ -18,6 +22,7 @@ type Config struct {
 	FCM      FCMConfig `yaml:"fcm"`      // firebase cloud messaging config
 	SSE      SSE       `yaml:"sse"`      // server-sent events config
 	Messages Messages  `yaml:"messages"` // messages config
+	Devices  Devices   `yaml:"devices"`  // devices config
 	Cache    Cache     `yaml:"cache"`    // cache (memory or redis) config
 	PubSub   PubSub    `yaml:"pubsub"`   // pubsub (memory or redis) config
 	JWT      JWT       `yaml:"jwt"`      // jwt config
@@ -79,6 +84,16 @@ type Messages struct {
 	HashingIntervalSeconds uint16 `yaml:"hashing_interval_seconds" envconfig:"MESSAGES__HASHING_INTERVAL_SECONDS"` // hashing interval in seconds
 }
 
+type Devices struct {
+	// SelectionStrategy is the automatic device selection strategy used when a
+	// message is enqueued without an explicit device ID: "least-loaded" (default,
+	// fewest pending messages) or "random".
+	SelectionStrategy string `yaml:"selection_strategy" envconfig:"DEVICES__SELECTION_STRATEGY"`
+	// ServiceCooldownSeconds is how long a device is skipped for automatic
+	// selection after it reports a no-service send failure. 0 disables it.
+	ServiceCooldownSeconds uint16 `yaml:"service_cooldown_seconds" envconfig:"DEVICES__SERVICE_COOLDOWN_SECONDS"`
+}
+
 type Cache struct {
 	URL string `yaml:"url" envconfig:"CACHE__URL"`
 }
@@ -129,6 +144,10 @@ func Default() Config {
 		Messages: Messages{
 			CacheTTLSeconds:        300, // 5 minutes
 			HashingIntervalSeconds: 60,
+		},
+		Devices: Devices{
+			SelectionStrategy:      string(devices.SelectionStrategyLeastLoaded),
+			ServiceCooldownSeconds: 300, // 5 minutes
 		},
 		Cache: Cache{
 			URL: "memory://",

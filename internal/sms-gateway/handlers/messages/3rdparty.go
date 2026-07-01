@@ -58,7 +58,7 @@ func NewThirdPartyController(params thirdPartyControllerParams) *ThirdPartyContr
 }
 
 //	@Summary		Enqueue message
-//	@Description	Enqueues a message for sending. If `deviceId` is set, the specified device is used; otherwise a random registered device is chosen.
+//	@Description	Enqueues a message for sending. If `deviceId` is set, the specified device is used; otherwise the eligible registered device with the fewest pending messages is chosen.
 //	@Security		ApiAuth
 //	@Security		JWTAuth
 //	@Tags			User, Messages
@@ -88,10 +88,11 @@ func (h *ThirdPartyController) post(userID string, c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	device, err := h.devicesSvc.GetAny(
+	device, err := h.devicesSvc.GetForSending(
 		userID,
 		req.DeviceID,
 		time.Duration(params.DeviceActiveWithin)*time.Hour,
+		h.messagesSvc.CountPendingByDevice,
 	)
 	if err != nil {
 		h.Logger.Error(

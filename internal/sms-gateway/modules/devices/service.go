@@ -78,7 +78,16 @@ func (s *Service) Get(userID string, filter ...SelectFilter) (models.Device, err
 	return s.devices.Get(filter...)
 }
 
-func (s *Service) GetAny(userID string, deviceID string, duration time.Duration) (*models.Device, error) {
+// LoadFunc reports the number of pending messages for each of the provided
+// device IDs. Devices absent from the returned map are treated as having zero
+// pending messages. It lets balanced selection query message load without the
+// devices module depending on the messages module.
+type LoadFunc func(deviceIDs []string) (map[string]int, error)
+
+// selectCandidates returns the devices eligible for automatic selection for the
+// given user, optionally narrowed to a single device ID and/or to devices seen
+// within the provided duration.
+func (s *Service) selectCandidates(userID string, deviceID string, duration time.Duration) ([]models.Device, error) {
 	filter := []SelectFilter{
 		WithUserID(userID),
 	}
@@ -89,7 +98,59 @@ func (s *Service) GetAny(userID string, deviceID string, duration time.Duration)
 		filter = append(filter, ActiveWithin(duration))
 	}
 
-	devices, err := s.devices.Select(filter...)
+	// For automatic selection, skip devices currently in a service cooldown.
+	// Fall back to the unfiltered set if that would leave nothing, so a message
+	// is still attempted even when every candidate is degraded. An explicitly
+	// pinned deviceID is always honoured regardless of cooldown.
+	if deviceID == "" && s.config.ServiceCooldown > 0 {
+		sendable, err := s.devices.Select(append(filter, Sendable())...)
+		if err != nil {
+			return nil, err
+		}
+		if len(sendable) > 0 {
+			return sendable, nil
+		}
+	}
+
+	return s.devices.Select(filter...)
+}
+
+// MarkServiceDegraded records that the device reported a no-service send
+// failure, putting it into a cooldown during which automatic selection skips
+// it. It is a no-op when the feature is disabled.
+func (s *Service) MarkServiceDegraded(ctx context.Context, deviceID string) error {
+	if s.config.ServiceCooldown <= 0 {
+		return nil
+	}
+
+	return s.devices.SetServiceDegradedUntil(ctx, deviceID, time.Now().Add(s.config.ServiceCooldown))
+}
+
+// ClearServiceDegraded lifts a device's service cooldown, e.g. after it reports
+// a successful send. It is a no-op when the feature is disabled.
+func (s *Service) ClearServiceDegraded(ctx context.Context, deviceID string) error {
+	if s.config.ServiceCooldown <= 0 {
+		return nil
+	}
+
+	return s.devices.ClearServiceDegraded(ctx, deviceID)
+}
+
+// GetForSending selects a device to enqueue a message on, honouring the
+// configured selection strategy. deviceID pins a specific device; duration
+// limits selection to devices active within it; load supplies pending-message
+// counts and is only consulted by the least-loaded strategy (never called for
+// random selection, so it incurs no query in that mode).
+func (s *Service) GetForSending(userID string, deviceID string, duration time.Duration, load LoadFunc) (*models.Device, error) {
+	if s.config.SelectionStrategy == SelectionStrategyRandom {
+		return s.GetAny(userID, deviceID, duration)
+	}
+
+	return s.GetLeastLoaded(userID, deviceID, duration, load)
+}
+
+func (s *Service) GetAny(userID string, deviceID string, duration time.Duration) (*models.Device, error) {
+	devices, err := s.selectCandidates(userID, deviceID, duration)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +166,61 @@ func (s *Service) GetAny(userID string, deviceID string, duration time.Duration)
 	idx := rand.IntN(len(devices)) //nolint:gosec //not critical
 
 	return &devices[idx], nil
+}
+
+// GetLeastLoaded selects the eligible device with the fewest pending messages.
+//
+// It applies the same filters as GetAny. When more than one device is eligible
+// it picks the one with the lowest pending-message count reported by load,
+// breaking ties randomly. If load is nil it falls back to random selection.
+func (s *Service) GetLeastLoaded(userID string, deviceID string, duration time.Duration, load LoadFunc) (*models.Device, error) {
+	devices, err := s.selectCandidates(userID, deviceID, duration)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(devices) == 0 {
+		return nil, ErrNotFound
+	}
+
+	if len(devices) == 1 {
+		return &devices[0], nil
+	}
+
+	if load == nil {
+		idx := rand.IntN(len(devices)) //nolint:gosec //not critical
+
+		return &devices[idx], nil
+	}
+
+	ids := make([]string, len(devices))
+	for i := range devices {
+		ids[i] = devices[i].ID
+	}
+
+	counts, err := load(ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get device load: %w", err)
+	}
+
+	return pickLeastLoaded(devices, counts), nil
+}
+
+// pickLeastLoaded returns the device with the lowest count. Devices missing from
+// counts are treated as zero. Ties are broken randomly by shuffling first.
+func pickLeastLoaded(devices []models.Device, counts map[string]int) *models.Device {
+	rand.Shuffle(len(devices), func(i, j int) { //nolint:gosec //not critical
+		devices[i], devices[j] = devices[j], devices[i]
+	})
+
+	best := 0
+	for i := 1; i < len(devices); i++ {
+		if counts[devices[i].ID] < counts[devices[best].ID] {
+			best = i
+		}
+	}
+
+	return &devices[best]
 }
 
 // GetByToken returns a device by token.

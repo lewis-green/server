@@ -32,11 +32,20 @@ func ActiveWithin(duration time.Duration) SelectFilter {
 	}
 }
 
+// Sendable restricts the selection to devices not currently in a service
+// cooldown (i.e. believed to have cellular service).
+func Sendable() SelectFilter {
+	return func(f *selectFilter) {
+		f.sendableOnly = true
+	}
+}
+
 type selectFilter struct {
 	id           *string
 	userID       *string
 	token        *string
 	activeWithin time.Duration
+	sendableOnly bool
 }
 
 func newFilter(filters ...SelectFilter) *selectFilter {
@@ -63,6 +72,11 @@ func (f *selectFilter) apply(query *gorm.DB) *gorm.DB {
 	}
 	if f.activeWithin != 0 {
 		query = query.Where("last_seen > ?", time.Now().Add(-f.activeWithin))
+	}
+	if f.sendableOnly {
+		// Parenthesised: raw-string conditions are ANDed without wrapping, so a
+		// bare OR here would break operator precedence against the other filters.
+		query = query.Where("(service_degraded_until IS NULL OR service_degraded_until <= ?)", time.Now())
 	}
 	return query
 }

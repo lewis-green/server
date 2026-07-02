@@ -90,11 +90,12 @@ func (h *ThirdPartyController) post(userID string, c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
-	device, err := h.devicesSvc.GetAny(
+	device, err := h.devicesSvc.GetForSending(
 		c.Context(),
 		userID,
 		req.DeviceID,
 		time.Duration(params.DeviceActiveWithin)*time.Hour,
+		h.messagesSvc.CountPendingByDevice,
 	)
 	if err != nil {
 		h.Logger.Error(

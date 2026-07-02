@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -21,6 +22,7 @@ type mobileControllerParams struct {
 	fx.In
 
 	MessagesSvc *messages.Service
+	DevicesSvc  *devices.Service
 
 	Validator *validator.Validate
 	Logger    *zap.Logger
@@ -30,6 +32,7 @@ type MobileController struct {
 	base.Handler
 
 	messagesSvc *messages.Service
+	devicesSvc  *devices.Service
 }
 
 func NewMobileController(params mobileControllerParams) *MobileController {
@@ -39,6 +42,7 @@ func NewMobileController(params mobileControllerParams) *MobileController {
 			Validator: params.Validator,
 		},
 		messagesSvc: params.MessagesSvc,
+		devicesSvc:  params.DevicesSvc,
 	}
 }
 
@@ -96,6 +100,8 @@ func (h *MobileController) patch(device devices.Device, c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
 
+	var sawSuccess, sawServiceFailure bool
+
 	for _, v := range req {
 		messageState := messages.MessageStateInput{
 			ID:         v.ID,
@@ -111,9 +117,45 @@ func (h *MobileController) patch(device devices.Device, c *fiber.Ctx) error {
 				zap.Error(err),
 			)
 		}
+
+		for _, r := range v.Recipients {
+			switch r.State {
+			case smsgateway.ProcessingStateSent, smsgateway.ProcessingStateDelivered:
+				sawSuccess = true
+			case smsgateway.ProcessingStateFailed:
+				if isServiceError(r.Error) {
+					sawServiceFailure = true
+				}
+			}
+		}
 	}
 
+	h.updateServiceState(c.UserContext(), device.ID, sawSuccess, sawServiceFailure)
+
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// updateServiceState reflects a device's reported send results onto its service
+// cooldown: a successful send proves the SIM has service and lifts any cooldown,
+// while a no-service failure (with no offsetting success) starts one so
+// automatic selection routes around the device.
+func (h *MobileController) updateServiceState(ctx context.Context, deviceID string, sawSuccess, sawServiceFailure bool) {
+	switch {
+	case sawSuccess:
+		if err := h.devicesSvc.ClearServiceDegraded(ctx, deviceID); err != nil {
+			h.Logger.Warn("failed to clear device service state",
+				zap.String("device_id", deviceID),
+				zap.Error(err),
+			)
+		}
+	case sawServiceFailure:
+		if err := h.devicesSvc.MarkServiceDegraded(ctx, deviceID); err != nil {
+			h.Logger.Warn("failed to mark device service degraded",
+				zap.String("device_id", deviceID),
+				zap.Error(err),
+			)
+		}
+	}
 }
 
 func (h *MobileController) Register(router fiber.Router) {

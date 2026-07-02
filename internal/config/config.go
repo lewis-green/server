@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"time"
+
+	"github.com/android-sms-gateway/server/internal/sms-gateway/modules/devices"
+)
 
 type GatewayMode string
 
@@ -18,6 +22,7 @@ type Config struct {
 	FCM      FCMConfig `yaml:"fcm"`      // firebase cloud messaging config
 	SSE      SSE       `yaml:"sse"`      // server-sent events config
 	Messages Messages  `yaml:"messages"` // messages config
+	Devices  Devices   `yaml:"devices"`  // devices config
 	Cache    Cache     `yaml:"cache"`    // cache (memory or redis) config
 	PubSub   PubSub    `yaml:"pubsub"`   // pubsub (memory or redis) config
 	JWT      JWT       `yaml:"jwt"`      // jwt config
@@ -90,6 +95,21 @@ type messagesQueueConfig struct {
 	StatsCacheTTL        Duration `yaml:"stats_cache_ttl"        envconfig:"MESSAGES__QUEUE__STATS_CACHE_TTL"`
 }
 
+type Devices struct {
+	// SelectionStrategy is the automatic device selection strategy used when a
+	// message is enqueued without an explicit device ID: "least-loaded" (default,
+	// fewest pending messages) or "random".
+	SelectionStrategy string `yaml:"selection_strategy" envconfig:"DEVICES__SELECTION_STRATEGY"`
+	// ServiceCooldownSeconds is how long a device is skipped for automatic
+	// selection after it reports a no-service send failure. 0 disables it.
+	ServiceCooldownSeconds uint16 `yaml:"service_cooldown_seconds" envconfig:"DEVICES__SERVICE_COOLDOWN_SECONDS"`
+	// DefaultActiveWithinSeconds, when non-zero, restricts automatic selection to
+	// devices seen within this window (unless the request sets its own
+	// deviceActiveWithin). Soft preference: falls back to all devices if none
+	// qualify. 0 disables it.
+	DefaultActiveWithinSeconds uint16 `yaml:"default_active_within_seconds" envconfig:"DEVICES__DEFAULT_ACTIVE_WITHIN_SECONDS"`
+}
+
 type Cache struct {
 	URL string `yaml:"url" envconfig:"CACHE__URL"`
 }
@@ -149,6 +169,11 @@ func Default() Config {
 				StatsRefreshInterval: Duration(time.Second * 5),
 				StatsCacheTTL:        Duration(time.Second * 60),
 			},
+		},
+		Devices: Devices{
+			SelectionStrategy:          string(devices.SelectionStrategyLeastLoaded),
+			ServiceCooldownSeconds:     300, // 5 minutes
+			DefaultActiveWithinSeconds: 600, // 10 minutes
 		},
 		Cache: Cache{
 			URL: "memory://",

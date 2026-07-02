@@ -38,6 +38,7 @@ messages:
 devices:
   selection_strategy: least-loaded # auto device selection: least-loaded or random [DEVICES__SELECTION_STRATEGY]
   service_cooldown_seconds: 300 # skip a device for N seconds after a no-service send failure; 0 to disable [DEVICES__SERVICE_COOLDOWN_SECONDS]
+  default_active_within_seconds: 600 # auto-selection prefers devices seen within N seconds (soft, falls back if none); 0 to disable [DEVICES__DEFAULT_ACTIVE_WITHIN_SECONDS]
 cache: # cache config
   url: memory:// # cache url (memory:// or redis://) [CACHE__URL]
 pubsub: # pubsub config

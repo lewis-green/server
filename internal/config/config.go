@@ -92,6 +92,11 @@ type Devices struct {
 	// ServiceCooldownSeconds is how long a device is skipped for automatic
 	// selection after it reports a no-service send failure. 0 disables it.
 	ServiceCooldownSeconds uint16 `yaml:"service_cooldown_seconds" envconfig:"DEVICES__SERVICE_COOLDOWN_SECONDS"`
+	// DefaultActiveWithinSeconds, when non-zero, restricts automatic selection to
+	// devices seen within this window (unless the request sets its own
+	// deviceActiveWithin). Soft preference: falls back to all devices if none
+	// qualify. 0 disables it.
+	DefaultActiveWithinSeconds uint16 `yaml:"default_active_within_seconds" envconfig:"DEVICES__DEFAULT_ACTIVE_WITHIN_SECONDS"`
 }
 
 type Cache struct {
@@ -146,8 +151,9 @@ func Default() Config {
 			HashingIntervalSeconds: 60,
 		},
 		Devices: Devices{
-			SelectionStrategy:      string(devices.SelectionStrategyLeastLoaded),
-			ServiceCooldownSeconds: 300, // 5 minutes
+			SelectionStrategy:          string(devices.SelectionStrategyLeastLoaded),
+			ServiceCooldownSeconds:     300, // 5 minutes
+			DefaultActiveWithinSeconds: 600, // 10 minutes
 		},
 		Cache: Cache{
 			URL: "memory://",

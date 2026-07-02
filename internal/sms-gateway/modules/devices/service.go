@@ -88,31 +88,49 @@ type LoadFunc func(deviceIDs []string) (map[string]int, error)
 // given user, optionally narrowed to a single device ID and/or to devices seen
 // within the provided duration.
 func (s *Service) selectCandidates(userID string, deviceID string, duration time.Duration) ([]models.Device, error) {
-	filter := []SelectFilter{
-		WithUserID(userID),
-	}
-	if deviceID != "" {
-		filter = append(filter, WithID(deviceID))
-	}
-	if duration > 0 {
-		filter = append(filter, ActiveWithin(duration))
+	// base filters: user scope, an explicit device pin, and an explicit
+	// per-request activity window. Rebuilt fresh each call to avoid
+	// slice-aliasing between the preferred and fallback queries.
+	base := func() []SelectFilter {
+		f := []SelectFilter{WithUserID(userID)}
+		if deviceID != "" {
+			f = append(f, WithID(deviceID))
+		}
+		if duration > 0 {
+			f = append(f, ActiveWithin(duration))
+		}
+		return f
 	}
 
-	// For automatic selection, skip devices currently in a service cooldown.
-	// Fall back to the unfiltered set if that would leave nothing, so a message
-	// is still attempted even when every candidate is degraded. An explicitly
-	// pinned deviceID is always honoured regardless of cooldown.
-	if deviceID == "" && s.config.ServiceCooldown > 0 {
-		sendable, err := s.devices.Select(append(filter, Sendable())...)
-		if err != nil {
-			return nil, err
+	// For automatic selection (no pinned device) prefer devices that are
+	// recently active (server default) and not in a service cooldown. These are
+	// soft preferences: if they would leave no candidates, fall back to the base
+	// set so a message is still attempted. An explicit deviceID or an explicit
+	// per-request duration is always honoured as-is.
+	if deviceID == "" {
+		preferred := base()
+		softened := false
+		if duration == 0 && s.config.DefaultActiveWithin > 0 {
+			preferred = append(preferred, ActiveWithin(s.config.DefaultActiveWithin))
+			softened = true
 		}
-		if len(sendable) > 0 {
-			return sendable, nil
+		if s.config.ServiceCooldown > 0 {
+			preferred = append(preferred, Sendable())
+			softened = true
+		}
+
+		if softened {
+			devices, err := s.devices.Select(preferred...)
+			if err != nil {
+				return nil, err
+			}
+			if len(devices) > 0 {
+				return devices, nil
+			}
 		}
 	}
 
-	return s.devices.Select(filter...)
+	return s.devices.Select(base()...)
 }
 
 // MarkServiceDegraded records that the device reported a no-service send

@@ -22,4 +22,10 @@ type Config struct {
 	// ServiceCooldown is how long a device is skipped for automatic selection
 	// after it reports a no-service send failure. Zero disables the feature.
 	ServiceCooldown time.Duration
+
+	// DefaultActiveWithin, when non-zero, restricts automatic selection to
+	// devices seen within this window (unless the request specifies its own
+	// deviceActiveWithin). It is a soft preference: if no device qualifies,
+	// selection falls back to all of the user's devices. Zero disables it.
+	DefaultActiveWithin time.Duration
 }
